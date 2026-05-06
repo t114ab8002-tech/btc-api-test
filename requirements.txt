@@ -1,8 +1,8 @@
 fastapi
 uvicorn
 yfinance
-tensorflow-cpu==2.14.0
+tensorflow-cpu==2.17.0
 pandas
-numpy<2.0.0
+numpy==1.26.4
 ta
 scikit-learn
