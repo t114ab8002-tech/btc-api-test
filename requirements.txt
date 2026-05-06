@@ -3,6 +3,6 @@ uvicorn
 yfinance
 tensorflow-cpu==2.14.0
 pandas
-numpy
+numpy<2.0.0
 ta
 scikit-learn
