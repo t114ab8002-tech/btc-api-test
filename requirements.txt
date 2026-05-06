@@ -1,7 +1,7 @@
 fastapi
 uvicorn
 yfinance
-tensorflow
+tensorflow-cpu==2.14.0
 pandas
 numpy
 ta
