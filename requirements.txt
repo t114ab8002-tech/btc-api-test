@@ -1,2 +1,8 @@
 fastapi
 uvicorn
+yfinance
+tensorflow-cpu
+pandas
+numpy
+ta
+scikit-learn
