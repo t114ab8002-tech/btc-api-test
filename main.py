@@ -3,14 +3,15 @@ import pandas as pd
 import numpy as np
 import ta
 import pickle
-import tensorflow as tf
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from tensorflow.keras.models import load_model
 
 app = FastAPI()
 
-# 1. 允許跨域連線
+# 全域變數，一開始先空著省記憶體
+MODEL = None
+SCALER = None
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -18,20 +19,17 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 2. 載入大腦 (模型) 與 翻譯機 (Scaler)
-# 使用 compile=False 和 safe_mode=False 強制跳過版本格式檢查
-try:
-    MODEL = load_model("lstm_best.keras", compile=False, safe_mode=False)
-    print("模型載入成功！")
-except Exception as e:
-    print(f"模型載入失敗，嘗試另一種方式: {e}")
-    # 備用方案：如果還是不行，這是在某些環境下的特殊載入法
-    MODEL = tf.keras.models.load_model("lstm_best.keras", compile=False)
+def lazy_load():
+    """只有在需要時才載入模型，節省啟動時的記憶體壓力"""
+    global MODEL, SCALER
+    if MODEL is None:
+        # 在函式內部才匯入 tensorflow，避免一開機就爆記憶體
+        from tensorflow.keras.models import load_model
+        MODEL = load_model("lstm_best.keras", compile=False, safe_mode=False)
+    if SCALER is None:
+        with open("lstm_scaler.pkl", "rb") as f:
+            SCALER = pickle.load(f)
 
-with open("lstm_scaler.pkl", "rb") as f:
-    SCALER = pickle.load(f)
-
-# 3. 定義特徵清單
 FEATURES = [
     "Close", "High", "Low", "Open", "Volume",
     "trend_macd", "trend_macd_signal", "trend_macd_diff",
@@ -42,45 +40,26 @@ FEATURES = [
     "momentum_stoch_rsi_d", "volume_obv"
 ]
 
-def get_realtime_data():
-    """自動抓取最新市況並計算指標"""
-    df = yf.download("BTC-USD", period="60d", interval="1d")
-    
-    if isinstance(df.columns, pd.MultiIndex):
-        df.columns = df.columns.get_level_values(0)
-    
-    df = ta.add_all_ta_features(
-        df, open="Open", high="High", low="Low", 
-        close="Close", volume="Volume", fillna=True
-    )
-    
-    target_data = df[FEATURES].tail(20)
-    return target_data
-
 @app.get("/api/get_latest_prediction")
 def predict():
     try:
-        # A. 抓取今日最新資料
-        data_df = get_realtime_data()
+        lazy_load() # 呼叫時才載入
+        df = yf.download("BTC-USD", period="60d", interval="1d")
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)
+        df = ta.add_all_ta_features(df, open="Open", high="High", low="Low", close="Close", volume="Volume", fillna=True)
+        target_data = df[FEATURES].tail(20)
         
-        # B. 資料標準化
-        scaled_data = SCALER.transform(data_df.values)
-        
-        # C. 轉成 LSTM 需要的 3D 形狀
+        scaled_data = SCALER.transform(target_data.values)
         input_tensor = np.array([scaled_data])
         
-        # D. 讓模型進行推論 (使用 flatten 確保相容舊版 TF 的輸出格式)
         prediction = MODEL.predict(input_tensor)
         prob = float(prediction.flatten()[0])
         
-        return {
-            "status": "success",
-            "probability": round(prob * 100, 2),
-            "message": "預測已根據今日最新市況更新！"
-        }
+        return {"status": "success", "probability": round(prob * 100, 2)}
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
 @app.get("/")
 def home():
-    return {"message": "比特幣 AI 雲端大腦運行中"}
+    return {"message": "AI Brain is Online"}
