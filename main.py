@@ -22,13 +22,28 @@ app.add_middleware(
 def lazy_load():
     """只有在需要時才載入模型，節省啟動時的記憶體壓力"""
     global MODEL, SCALER
+    
+    # 1. 處理模型載入
     if MODEL is None:
-        # 在函式內部才匯入 tensorflow，避免一開機就爆記憶體
-        from tensorflow.keras.models import load_model
-        MODEL = load_model("lstm_best.keras", compile=False, safe_mode=False)
+        try:
+            # 在函式內部才匯入 tensorflow，避免一開機就爆記憶體
+            from tensorflow.keras.models import load_model
+            # .h5 格式建議只使用 compile=False 即可
+            MODEL = load_model("lstm_best.h5", compile=False)
+            print("模型載入成功！")
+        except Exception as e:
+            print(f"模型載入失敗: {e}")
+            raise e # 拋出錯誤讓 API 能夠回傳錯誤訊息
+            
+    # 2. 處理 Scaler 載入 (這部分要獨立出來，不能縮排在 except 裡面)
     if SCALER is None:
-        with open("lstm_scaler.pkl", "rb") as f:
-            SCALER = pickle.load(f)
+        try:
+            with open("lstm_scaler.pkl", "rb") as f:
+                SCALER = pickle.load(f)
+            print("Scaler 載入成功！")
+        except Exception as e:
+            print(f"Scaler 載入失敗: {e}")
+            raise e
 
 FEATURES = [
     "Close", "High", "Low", "Open", "Volume",
@@ -44,12 +59,17 @@ FEATURES = [
 def predict():
     try:
         lazy_load() # 呼叫時才載入
+        
+        # 抓取資料
         df = yf.download("BTC-USD", period="60d", interval="1d")
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
+            
+        # 計算指標
         df = ta.add_all_ta_features(df, open="Open", high="High", low="Low", close="Close", volume="Volume", fillna=True)
         target_data = df[FEATURES].tail(20)
         
+        # 標準化與預測
         scaled_data = SCALER.transform(target_data.values)
         input_tensor = np.array([scaled_data])
         
